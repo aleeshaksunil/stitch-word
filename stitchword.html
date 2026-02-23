@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Stitchwords Game</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      font-family: sans-serif;
+      margin: 0;
+      background: #333;
+      color: white;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 10px;
+    }
+    .title {
+      font-size: 1.5rem;
+      margin: 10px 0;
+    }
+    .instructions {
+      background: #444;
+      padding: 10px;
+      margin: 10px;
+      border-radius: 5px;
+      max-width: 600px;
+      font-size: 0.9rem;
+    }
+    .word-bank {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .word-bank button {
+      background: #555;
+      color: white;
+      border: none;
+      padding: 5px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(10, 30px);
+      grid-template-rows: repeat(10, 30px);
+      gap: 2px;
+      margin-bottom: 10px;
+    }
+    .cell {
+      width: 30px;
+      height: 30px;
+      background: #888;
+      color: white;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-weight: bold;
+      user-select: none;
+    }
+    .cell.black {
+      background: black;
+    }
+    .cell.selected {
+      outline: 2px dashed yellow;
+    }
+    .cell.found {
+      font-weight: bold;
+    }
+    .buttons {
+      margin: 10px;
+      display: flex;
+      gap: 10px;
+    }
+    .buttons button {
+      padding: 5px 10px;
+      border: none;
+      border-radius: 4px;
+      background-color: #666;
+      color: white;
+      cursor: pointer;
+    }
+    .reward, .failure {
+      display: none;
+      margin-top: 15px;
+      font-size: 1.2rem;
+      color: gold;
+    }
+    .reward.show, .failure.show {
+      display: block;
+    }
+    .timer {
+      font-size: 1rem;
+      margin: 10px;
+      color: #f1c40f;
+    }
+  </style>
+</head>
+<body>
+  <div class="title">Stitchwords - <span id="today"></span></div>
+  <div class="instructions">
+    <strong>Instructions:</strong> Find all the hidden words by dragging across the letters in the grid. 
+    Each word you find will be highlighted in a unique color. You have 3 minutes to find all the words. 
+    If time runs out, you lose the game. Use Reset to start over, Undo to remove the last letter.
+  </div>
+  <div class="timer" id="timer">Time Left: 03:00</div>
+  <div class="word-bank" id="wordBank"></div>
+  <div class="grid" id="grid"></div>
+  <div class="buttons">
+    <button onclick="resetGame()">Reset</button>
+    <button onclick="undoInput()">Undo</button>
+    <button onclick="redoInput()">Redo</button>
+  </div>
+  <div class="reward" id="reward">🎉 Puzzle Complete! 🎉</div>
+  <div class="failure" id="failure">⏰ Time's up! You lost the game.</div>
+
+  <script>
+    const words = [
+      "COMEDY", "CONCEPT", "DRY", "EGG", "EXAMPLE", "FINALLY",
+      "GOVERNOR", "JET", "LEADING", "METHOD", "NARROW",
+      "SURVEY", "SWITCH", "THIN", "WEEKEND"
+    ];
+
+    const layout = [
+      "JCOTPECSME",
+      "ETM-OWNURT",
+      "-HERR-OCVH",
+      "TCDA-WEEEO",
+      "IGYNN-IKYD",
+      "WOV--HTEND",
+      "S-ERNOXEL-",
+      "LLA-ERADAE",
+      "YGNILPMIYR",
+      "EGF--FGN-D"
+    ];
+
+    const colors = ["#3498db", "#9b59b6", "#e67e22", "#e74c3c", "#1abc9c", "#f1c40f", "#2ecc71", "#d35400", "#2980b9", "#8e44ad", "#16a085", "#c0392b", "#27ae60", "#7f8c8d", "#f39c12"];
+
+    const gridContainer = document.getElementById('grid');
+    const wordBank = document.getElementById('wordBank');
+    const reward = document.getElementById('reward');
+    const failure = document.getElementById('failure');
+    const timerDisplay = document.getElementById('timer');
+    const today = document.getElementById('today');
+
+    let selected = [], foundWords = new Set();
+    let timerInterval;
+    let timeLeft = 180;
+
+    today.textContent = new Date().toLocaleDateString();
+
+    function startTimer() {
+      clearInterval(timerInterval);
+      timerInterval = setInterval(() => {
+        if (--timeLeft <= 0) {
+          clearInterval(timerInterval);
+          failure.classList.add('show');
+        }
+        const minutes = String(Math.floor(timeLeft / 60)).padStart(2, '0');
+        const seconds = String(timeLeft % 60).padStart(2, '0');
+        timerDisplay.textContent = `Time Left: ${minutes}:${seconds}`;
+      }, 1000);
+    }
+
+    function createGrid() {
+      gridContainer.innerHTML = '';
+      layout.forEach((row, i) => {
+        row.split('').forEach((char, j) => {
+          const cell = document.createElement('div');
+          cell.classList.add('cell');
+          if (char === '-') {
+            cell.classList.add('black');
+          } else {
+            cell.textContent = char;
+            cell.dataset.letter = char;
+            cell.dataset.row = i;
+            cell.dataset.col = j;
+            cell.addEventListener('mouseenter', e => {
+              if (e.buttons === 1) toggleSelection(cell);
+            });
+            cell.addEventListener('mousedown', () => toggleSelection(cell));
+          }
+          gridContainer.appendChild(cell);
+        });
+      });
+    }
+
+    function toggleSelection(cell) {
+      if (!cell.classList.contains('selected') && !cell.classList.contains('found')) {
+        cell.classList.add('selected');
+        selected.push(cell);
+        checkWord();
+      }
+    }
+
+    function undoInput() {
+      const last = selected.pop();
+      if (last) last.classList.remove('selected');
+    }
+
+    function redoInput() {
+      // Optional: redo logic
+    }
+
+    function resetGame() {
+      foundWords.clear();
+      selected = [];
+      clearInterval(timerInterval);
+      timeLeft = 180;
+      reward.classList.remove('show');
+      failure.classList.remove('show');
+      timerDisplay.textContent = "Time Left: 03:00";
+      createGrid();
+      renderWordBank();
+      startTimer();
+    }
+
+    function renderWordBank() {
+      wordBank.innerHTML = '';
+      words.forEach(word => {
+        const btn = document.createElement('button');
+        btn.textContent = word;
+        btn.id = 'word-' + word;
+        wordBank.appendChild(btn);
+      });
+    }
+
+    function checkWord() {
+      const currentWord = selected.map(cell => cell.dataset.letter).join('');
+      const wordIndex = words.indexOf(currentWord);
+      if (wordIndex !== -1 && !foundWords.has(currentWord)) {
+        foundWords.add(currentWord);
+        selected.forEach(cell => {
+          cell.classList.remove('selected');
+          cell.classList.add('found');
+          cell.style.background = colors[wordIndex];
+          cell.style.color = 'black';
+        });
+        const wordBtn = document.getElementById('word-' + currentWord);
+        wordBtn.style.background = colors[wordIndex];
+        selected = [];
+        if (foundWords.size === words.length) {
+          reward.classList.add('show');
+          clearInterval(timerInterval);
+        }
+      }
+    }
+
+    resetGame();
+  </script>
+</body>
+</html>
